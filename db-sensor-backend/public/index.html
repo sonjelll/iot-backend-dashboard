@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="id" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard Data Sensor</title>
+  <style>
+    :root{
+      --bg:#0b1020; --fg:#e9eef7; --card:#131a33; --muted:#9fb0d0; --accent:#25c2a0; --accent-2:#5aa9ff;
+      --table-border:#253055; --chip:#1c274a;
+    }
+    [data-theme="light"]{
+      --bg:#f6f8fc; --fg:#0f1a2b; --card:#ffffff; --muted:#54627a; --accent:#0aa981; --accent-2:#2c7efc;
+      --table-border:#e7ecf6; --chip:#eef3ff;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; font-family:Inter,system-ui,Segoe UI,Arial,sans-serif; background:var(--bg); color:var(--fg);}
+    header{background:linear-gradient(90deg,var(--accent-2),var(--accent)); color:#fff; padding:18px 22px;}
+    header h1{margin:0; font-size:22px; letter-spacing:.3px}
+    header .sub{opacity:.9; font-size:13px}
+    .wrap{max-width:1100px; margin:22px auto; padding:0 16px}
+
+    .bar{display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:12px}
+    .actions{display:flex; gap:8px}
+    button{border:1px solid var(--table-border); background:var(--card); color:var(--fg);
+      padding:8px 12px; border-radius:10px; cursor:pointer}
+    button:hover{filter:brightness(1.05)}
+    .card{background:var(--card); border:1px solid var(--table-border); border-radius:16px; padding:16px; margin:12px 0}
+    h3{margin:0 0 12px 0; font-size:16px}
+    .muted{color:var(--muted)}
+
+    .grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px}
+    .kpi{padding:14px; border:1px solid var(--table-border); border-radius:14px; background:var(--card)}
+    .kpi .label{font-size:12px; color:var(--muted)}
+    .kpi .val{font-size:24px; font-weight:700; margin-top:4px}
+
+    .chips{display:flex; flex-wrap:wrap; gap:8px}
+    .chip{background:var(--chip); color:var(--fg); border:1px solid var(--table-border);
+      padding:6px 10px; border-radius:999px; font-size:12px}
+
+    pre{background:var(--chip); border:1px solid var(--table-border); padding:10px; border-radius:12px; overflow:auto}
+
+    table{width:100%; border-collapse:collapse; font-size:14px}
+    th,td{border-bottom:1px solid var(--table-border); padding:10px 12px; text-align:left}
+    th{background:transparent; font-weight:600}
+    tbody tr:hover{background:rgba(127,127,127,.06)}
+    .right{text-align:right}
+    @media (max-width:800px){ .grid{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>IoT Sensor Dashboard</h1>
+    <div class="sub">Suhu · Kelembapan · Kecerahan — real-time dari ESP32 (MQTT)</div>
+  </header>
+
+  <div class="wrap">
+    <div class="bar">
+      <div class="muted" id="updated">Terakhir diperbarui: —</div>
+      <div class="actions">
+        <button id="toggleSort">Urutkan: Naik</button>
+        <button id="toggleTheme">Mode: Light</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Ringkasan</h3>
+      <div class="grid">
+        <div class="kpi"><div class="label">Suhu Maks (°C)</div><div class="val" id="kpiMax">-</div></div>
+        <div class="kpi"><div class="label">Suhu Min (°C)</div><div class="val" id="kpiMin">-</div></div>
+        <div class="kpi"><div class="label">Suhu Rata (°C)</div><div class="val" id="kpiAvg">-</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Nilai Maks Gabungan (suhu = max & humid = max)</h3>
+      <div class="muted" id="bothHint">Memuat…</div>
+      <pre id="bothRows">[]</pre>
+      <div class="chips" id="monthChips"></div>
+    </div>
+
+    <div class="card">
+      <h3>Semua Data (50 terbaru)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th class="right">Suhu (°C)</th>
+            <th class="right">Kelembapan (%)</th>
+            <th class="right">Kecerahan (lux)</th>
+            <th>Timestamp</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="5" class="muted">Memuat…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let ascending = true;
+
+    document.getElementById('toggleSort').onclick = () => {
+      ascending = !ascending;
+      document.getElementById('toggleSort').textContent = 'Urutkan: ' + (ascending ? 'Naik' : 'Turun');
+      loadLatest();
+    };
+
+    document.getElementById('toggleTheme').onclick = () => {
+      const root = document.documentElement;
+      const now = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      root.setAttribute('data-theme', now);
+      document.getElementById('toggleTheme').textContent = 'Mode: ' + (now === 'light' ? 'Light' : 'Dark');
+    };
+
+    async function loadSummary() {
+      const r = await fetch('/api/summary');
+      const d = await r.json();
+
+      document.getElementById('kpiMax').textContent = d.suhumax ?? '-';
+      document.getElementById('kpiMin').textContent = d.suhmin ?? '-';
+      document.getElementById('kpiAvg').textContent = d.suhurata ?? '-';
+
+      const arr = d.nilai_suhu_max_humid_max || [];
+      document.getElementById('bothRows').textContent = JSON.stringify(arr, null, 2);
+
+      const hint = document.getElementById('bothHint');
+      if (arr.length === 0) {
+        hint.textContent = 'Belum ada baris yang sekaligus memegang rekor suhu & kelembapan. (Normal jika rekor terjadi di waktu berbeda.)';
+      } else {
+        hint.textContent = `Ditemukan ${arr.length} baris rekor gabungan.`;
+      }
+
+      const chips = document.getElementById('monthChips');
+      chips.innerHTML = (d.month_year_max || [])
+        .map(x => `<span class="chip">${x.month_year}</span>`)
+        .join('');
+    }
+
+    async function loadLatest() {
+      const r = await fetch('/api/latest?n=50');
+      let data = await r.json();
+      // tampilkan sesuai toggle
+      data = ascending ? data.sort((a,b)=>a.id-b.id) : data.sort((a,b)=>b.id-a.id);
+
+      const tb = document.getElementById('rows');
+      if (!data.length) {
+        tb.innerHTML = `<tr><td colspan="5" class="muted">Belum ada data</td></tr>`;
+        return;
+      }
+      tb.innerHTML = data.map(d => `
+        <tr>
+          <td>${d.id}</td>
+          <td class="right">${Number(d.suhu).toFixed(2)}</td>
+          <td class="right">${Number(d.humidity).toFixed(2)}</td>
+          <td class="right">${Number(d.lux).toFixed(2)}</td>
+          <td>${(d.timestamp || '').toString().replace('T',' ').slice(0,19)}</td>
+        </tr>
+      `).join('');
+
+      document.getElementById('updated').textContent =
+        'Terakhir diperbarui: ' + new Date().toLocaleString();
+    }
+
+    function tick(){ loadSummary(); loadLatest(); }
+    tick();
+    setInterval(tick, 5000);
+  </script>
+</body>
+</html>
